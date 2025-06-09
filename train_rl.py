@@ -36,6 +36,7 @@ class RLTrainer:
                  rollout_batch_size: int,
                  save_every_episodes: int,
                  log_every_steps: int,
+                 track_kl: bool,
                  model_config: Dict,
                  experiment_name: Optional[str]=None):
         self.device_str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -88,6 +89,10 @@ class RLTrainer:
         self.grad_norm = 0.0
 
         self.global_steps = 0
+
+        self.track_kl = track_kl
+        if self.track_kl:
+            self.kl_div = 0.0
 
         # logger
         self.logger = logging.getLogger(__name__)
@@ -247,6 +252,15 @@ class RLTrainer:
         draws = 0
         errors = 0
         max_step_exceeded = 0
+        
+        # After collecting rollouts, inspect a random game
+        """if games:  # games from _collect_rollout
+            valid_games = [g for g in games if g.valid]
+            if valid_games:
+                import random
+                game_to_inspect = random.choice(valid_games)
+                inspect_game_trajectory(game_to_inspect, stockfish_path="/usr/games/stockfish")"""
+
         for game in games:
             if game.completion_reason == "1-0":
                 self.buffer.push_game(game)
@@ -341,6 +355,28 @@ class RLTrainer:
                             self.invalid_pen_ratio * invalid_loss
                         )
 
+                        if self.track_kl:
+                            # In _update_params, when computing KL:
+                            with torch.no_grad():
+                                # Put BOTH models in eval mode for consistent predictions
+                                self.model_old.eval()
+                                self.model.eval()
+                                
+                                # Get logits from the OLD model
+                                old_logits, _ = self.model_old(fens_b, reps_b.squeeze(-1))
+                                old_masked_logits = old_logits + invs_b
+                                old_dist = Categorical(logits=old_masked_logits)
+                                
+                                # Get current logits (still in eval mode)
+                                current_logits, _ = self.model(fens_b, reps_b.squeeze(-1))
+                                current_masked_logits = current_logits + invs_b
+                                current_dist = Categorical(logits=current_masked_logits)
+                                
+                                self.kl_div = torch.distributions.kl_divergence(old_dist, current_dist).mean()
+                                
+                                # Put model back in train mode
+                                self.model.train()
+
                     self.scaler.scale(loss/self.accumulation_steps).backward()
 
                     self.policy_loss_accumulator += policy_loss.item()
@@ -396,170 +432,6 @@ class RLTrainer:
         self._save_checkpoint(episode=self.num_episodes+self.start_episode,mark="final")
         swanlab.finish()
         print("Training complete!")
-
-    def inspect_buffer(self, games=None, verbose=True):
-        """
-        Inspect the buffer contents to verify examples are properly processed.
-        
-        Args:
-            games: Optional list of Game objects that were just pushed (for cross-reference)
-            verbose: Whether to print detailed information
-        
-        Returns:
-            dict: Statistics about the buffer contents
-        """
-        if len(self.buffer) == 0:
-            print("Buffer is empty. Nothing to inspect.")
-            return {}
-        
-        stats = {
-            "total_examples": len(self.buffer),
-            "white_examples": 0,
-            "black_examples": 0,
-            "avg_repetition": 0,
-            "avg_advantage": 0,
-            "max_advantage": float('-inf'),
-            "min_advantage": float('inf'),
-            "invalid_move_proportion": 0,
-            "action_distribution": {},
-        }
-        
-        # Sample inspection of buffer entries
-        fens = list(self.buffer.fens)
-        reps = list(self.buffer.repetition_counts)
-        actions = list(self.buffer.actions)
-        log_probs = list(self.buffer.log_probs)
-        values = list(self.buffer.values)
-        advantages = list(self.buffer.advantages)
-        invalid_masks = list(self.buffer.invalid_masks)
-        
-        # Count white and black examples
-        for fen in fens:
-            board = chess.Board(fen)
-            if board.turn:  # True for white, False for black
-                stats["white_examples"] += 1
-            else:
-                stats["black_examples"] += 1
-        
-        # Compute averages
-        stats["avg_repetition"] = sum(r.item() if torch.is_tensor(r) else r for r in reps) / len(reps)
-        
-        adv_values = [a.item() if torch.is_tensor(a) else a for a in advantages]
-        stats["avg_advantage"] = sum(adv_values) / len(adv_values)
-        stats["max_advantage"] = max(adv_values)
-        stats["min_advantage"] = min(adv_values)
-        
-        # Check invalid move masks
-        invalid_move_count = 0
-        total_moves = 0
-        for mask in invalid_masks:
-            if torch.is_tensor(mask):
-                invalid_count = (mask == -1e9).sum().item()
-                total_count = mask.numel()
-            else:
-                invalid_count = sum(1 for x in mask if x == -1e9)
-                total_count = len(mask)
-            
-            invalid_move_count += invalid_count
-            total_moves += total_count
-        
-        stats["invalid_move_proportion"] = invalid_move_count / total_moves if total_moves > 0 else 0
-        
-        # Action distribution
-        for action in actions:
-            action_idx = action.item() if torch.is_tensor(action) else action
-            action_uci = IDX_TO_UCI_MOVE.get(action_idx, "unknown")
-            stats["action_distribution"][action_uci] = stats["action_distribution"].get(action_uci, 0) + 1
-        
-        # Sort action distribution by frequency
-        stats["action_distribution"] = dict(sorted(
-            stats["action_distribution"].items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:10])  # Only show top 10
-        
-        # Verify a few examples if verbose
-        if verbose:
-            print(f"\n===== Buffer Inspection =====")
-            print(f"Total examples: {stats['total_examples']}")
-            print(f"White/Black split: {stats['white_examples']}/{stats['black_examples']}")
-            print(f"Average repetition count: {stats['avg_repetition']:.2f}")
-            print(f"Advantage stats: Avg={stats['avg_advantage']:.4f}, Min={stats['min_advantage']:.4f}, Max={stats['max_advantage']:.4f}")
-            print(f"Invalid move proportion: {stats['invalid_move_proportion']*100:.2f}%")
-            
-            print("\nTop actions:")
-            for uci, count in stats["action_distribution"].items():
-                print(f"  {uci}: {count} ({count/len(actions)*100:.1f}%)")
-            
-            # Detailed example inspection for the first few examples
-            num_samples = min(5, len(self.buffer))
-            print(f"\nDetailed inspection of {num_samples} random examples:")
-            
-            indices = np.random.choice(len(self.buffer), num_samples, replace=False)
-            for idx in indices:
-                fen = fens[idx]
-                board = chess.Board(fen)
-                action_idx = actions[idx].item() if torch.is_tensor(actions[idx]) else actions[idx]
-                action_uci = IDX_TO_UCI_MOVE.get(action_idx, "unknown")
-                
-                print(f"\nExample {idx}:")
-                print(f"  Turn: {'White' if board.turn else 'Black'}")
-                print(f"  FEN: {fen}")
-                print(f"  Action: {action_uci}")
-                print(f"  Value: {values[idx].item() if torch.is_tensor(values[idx]) else values[idx]:.4f}")
-                print(f"  Advantage: {advantages[idx].item() if torch.is_tensor(advantages[idx]) else advantages[idx]:.4f}")
-                
-                # Verify move validity
-                if action_uci != "<claim_draw>" and action_uci != "unknown":
-                    try:
-                        move = chess.Move.from_uci(action_uci)
-                        is_legal = move in board.legal_moves
-                        print(f"  Move is {'legal' if is_legal else 'ILLEGAL'}")
-                    except ValueError:
-                        print(f"  Invalid UCI move: {action_uci}")
-                elif action_uci == "<claim_draw>":
-                    print(f"  Draw claim {'valid' if board.can_claim_draw() else 'INVALID'}")
-                
-                # Check invalid mask for this example
-                mask = invalid_masks[idx]
-                if torch.is_tensor(mask):
-                    invalid_count = (mask == -1e9).sum().item()
-                    total_count = mask.numel()
-                else:
-                    invalid_count = sum(1 for x in mask if x == -1e9)
-                    total_count = len(mask)
-                
-                print(f"  Invalid moves: {invalid_count}/{total_count} ({invalid_count/total_count*100:.1f}%)")
-                
-            # Cross-reference with games if provided
-            if games:
-                print("\nCross-reference with provided games:")
-                valid_game_count = sum(1 for g in games if g.valid)
-                print(f"  Valid games: {valid_game_count}/{len(games)}")
-                
-                # Sample a valid game for detailed inspection
-                for game in games:
-                    if game.valid:
-                        result = game.completion_reason
-                        white_moves = len(game.get_white_trajectory()['fens'])
-                        black_moves = len(game.get_black_trajectory()['fens'])
-                        
-                        print(f"  Game result: {result}")
-                        print(f"  White moves: {white_moves}")
-                        print(f"  Black moves: {black_moves}")
-                        print(f"  Total positions: {len(game.fens)}")
-                        
-                        # Show the last position
-                        if game.fens:
-                            last_fen = game.fens[-1]
-                            last_board = chess.Board(last_fen)
-                            print(f"  Last position: {last_fen}")
-                            print(f"  Board is in checkmate: {last_board.is_checkmate()}")
-                            print(f"  Board is in stalemate: {last_board.is_stalemate()}")
-                            print(f"  Board is in draw: {last_board.is_insufficient_material()}")
-                        break
-        
-        return stats
 
     def _save_checkpoint(self, episode: str, mark: str):
         """Save model checkpoint"""
@@ -620,6 +492,11 @@ class RLTrainer:
             f" | Pos Emb Norm (Mean/Std): {pos_norm_mean:.4f}/{pos_norm_std:.4f}"
         )
 
+        if self.track_kl:
+            log_message += (
+                f" | KL Div: {self.kl_div:.4f}"
+            )
+
         buffer_size = len(self.buffer)
         log_message += f" | Buffer Size: {buffer_size:06d}"
 
@@ -627,7 +504,7 @@ class RLTrainer:
 
         self.logger.info(log_message)
 
-        swanlab.log({
+        swanlab_message = {
             "avg pol loss": avg_policy_loss,
             "avg val loss": avg_value_loss,
             "avg ent loss": avg_entropy_loss,
@@ -640,7 +517,10 @@ class RLTrainer:
             "pos_norm_std": pos_norm_std,
             "step": self.global_steps,
             "grad_norm": self.grad_norm,
-        })
+        }
+        if self.track_kl:
+            swanlab_message["kl div"] = self.kl_div
+        swanlab.log(swanlab_message)
 
         self.policy_loss_accumulator = 0.0
         self.value_loss_accumulator = 0.0
@@ -648,16 +528,214 @@ class RLTrainer:
         self.invalid_loss_accumulator = 0.0
         self.samples_since_log = 0
 
+def inspect_game_trajectory(game, stockfish_path=None, stockfish_depth=16):
+    """
+    Inspect a complete game trajectory showing how values and advantages evolve.
+    
+    Args:
+        game: A Game object containing the complete trajectory
+        stockfish_path: Path to stockfish executable
+        stockfish_depth: Depth for stockfish analysis
+    """
+    if not game.valid or not game.fens:
+        print("Invalid or empty game!")
+        return
+    
+    # Initialize Stockfish if available
+    sf_engine = None
+    stockfish_path="/usr/games/stockfish"
+    stockfish_depth=18
+    if stockfish_path:
+        try:
+            from utils import Engine, StockfishConfig
+            config = StockfishConfig(
+                engine_path=stockfish_path,
+                depth=stockfish_depth
+            )
+            sf_engine = Engine(type="stockfish", stockfish_config=config)
+            print(f"Stockfish initialized at depth {stockfish_depth}")
+        except Exception as e:
+            print(f"Failed to initialize Stockfish: {e}")
+    
+    print(f"\n{'='*120}")
+    print(f"GAME TRAJECTORY ANALYSIS - Result: {game.game_result}")
+    print(f"{'='*120}\n")
+    
+    # Convert game result to numeric
+    if game.game_result == "1-0":
+        numeric_result = 1.0
+    elif game.game_result == "0-1":
+        numeric_result = -1.0
+    else:
+        numeric_result = 0.0
+    
+    import torch
+    # Prepare data for visualization
+    trajectory_data = []
+
+    for i in range(len(game.fens)):
+        board = chess.Board(game.fens[i])
+        turn = "White" if board.turn else "Black"
+        move_number = (len(board.move_stack) + 1) // 2 + (1 if board.turn else 0)
+        
+        # Get move
+        action_idx = game.actions[i].item() if torch.is_tensor(game.actions[i]) else game.actions[i]
+        move_uci = IDX_TO_UCI_MOVE.get(action_idx, "unknown")
+        
+        # Get values
+        value = game.values[i].item() if torch.is_tensor(game.values[i]) else game.values[i]
+        log_prob = game.log_probs[i].item() if torch.is_tensor(game.log_probs[i]) else game.log_probs[i]
+        
+        # Get Stockfish evaluation
+        sf_eval = None
+        if sf_engine:
+            try:
+                sf_eval = sf_engine.analyze_position(board)
+                sf_eval = sf_eval if board.turn==chess.WHITE else -sf_eval
+            except:
+                pass
+        
+        trajectory_data.append({
+            'move_number': move_number,
+            'turn': turn,
+            'move': move_uci,
+            'value': value,
+            'log_prob': log_prob,
+            'sf_eval': sf_eval,
+            'fen': game.fens[i]
+        })
+    
+    # Calculate advantages using the same GAE method
+    import torch
+    values_tensor = torch.tensor([d['value'] for d in trajectory_data])
+    
+    # Separate by color
+    white_indices = [i for i, d in enumerate(trajectory_data) if d['turn'] == 'White']
+    black_indices = [i for i, d in enumerate(trajectory_data) if d['turn'] == 'Black']
+    
+    # Calculate advantages for each side
+    gamma = 0.99  # Should match your training config
+    gae_lambda = 0.95
+    
+    def compute_advantages(indices, final_reward):
+        if not indices:
+            return {}
+        
+        values = torch.tensor([trajectory_data[i]['value'] for i in indices])
+        T = len(values)
+        advantages = torch.zeros(T)
+        
+        next_value = 0.0
+        gae = 0.0
+        
+        for t in reversed(range(T)):
+            reward = final_reward if t == T-1 else 0.0
+            delta = reward + gamma * next_value - values[t]
+            gae = delta + gamma * gae_lambda * gae
+            advantages[t] = gae
+            next_value = values[t]
+        
+        return {indices[i]: advantages[i].item() for i in range(T)}
+    
+    white_advantages = compute_advantages(white_indices, numeric_result)
+    black_advantages = compute_advantages(black_indices, -numeric_result)
+    all_advantages = {**white_advantages, **black_advantages}
+    
+    # Display trajectory
+    print(f"{'Move':<6} {'Turn':<6} {'Action':<12} {'Value':<8} {'Adv':<8} {'SF Eval':<8} {'V+A':<8} {'LogP':<8}")
+    print("-" * 80)
+    
+    for i, data in enumerate(trajectory_data):
+        adv = all_advantages.get(i, 0.0)
+        v_plus_a = data['value'] + adv
+        sf_str = f"{data['sf_eval']:.3f}" if data['sf_eval'] is not None else "N/A"
+        
+        # Color code based on advantage sign
+        adv_str = f"{adv:+.3f}"
+        if adv > 0.1:
+            adv_str = f"\033[92m{adv_str}\033[0m"  # Green for positive
+        elif adv < -0.1:
+            adv_str = f"\033[91m{adv_str}\033[0m"  # Red for negative
+        
+        print(f"{data['move_number']:<6} {data['turn']:<6} {data['move']:<12} "
+              f"{data['value']:+.3f}   {adv_str}   {sf_str:<8} "
+              f"{v_plus_a:+.3f}   {data['log_prob']:.3f}")
+    
+    # Summary statistics
+    print(f"\n{'-'*80}")
+    print("SUMMARY STATISTICS")
+    print(f"{'-'*80}")
+    
+    all_values = [d['value'] for d in trajectory_data]
+    all_advs = [all_advantages.get(i, 0.0) for i in range(len(trajectory_data))]
+    
+    # Split by game phase
+    early_game = trajectory_data[:20]
+    mid_game = trajectory_data[20:40]
+    end_game = trajectory_data[40:]
+    
+    for phase_name, phase_data in [("Early Game (moves 1-20)", early_game),
+                                   ("Mid Game (moves 21-40)", mid_game),
+                                   ("End Game (moves 41+)", end_game)]:
+        if not phase_data:
+            continue
+            
+        phase_indices = trajectory_data.index(phase_data[0])
+        phase_values = [d['value'] for d in phase_data]
+        phase_advs = [all_advantages.get(trajectory_data.index(d), 0.0) for d in phase_data]
+        
+        print(f"\n{phase_name}:")
+        print(f"  Values: mean={np.mean(phase_values):.3f}, std={np.std(phase_values):.3f}")
+        print(f"  Advantages: mean={np.mean(phase_advs):.3f}, std={np.std(phase_advs):.3f}, "
+              f"max_abs={max(abs(a) for a in phase_advs):.3f}")
+    
+    # Value prediction accuracy vs Stockfish
+    if sf_engine:
+        sf_errors = []
+        for data in trajectory_data:
+            if data['sf_eval'] is not None:
+                error = abs(data['value'] - data['sf_eval'])
+                sf_errors.append(error)
+        
+        if sf_errors:
+            print(f"\nValue prediction vs Stockfish:")
+            print(f"  Mean absolute error: {np.mean(sf_errors):.3f}")
+            print(f"  Max error: {max(sf_errors):.3f}")
+            
+            # Error by game phase
+            early_errors = [abs(d['value'] - d['sf_eval']) for d in early_game if d['sf_eval'] is not None]
+            mid_errors = [abs(d['value'] - d['sf_eval']) for d in mid_game if d['sf_eval'] is not None]
+            end_errors = [abs(d['value'] - d['sf_eval']) for d in end_game if d['sf_eval'] is not None]
+            
+            if early_errors:
+                print(f"  Early game MAE: {np.mean(early_errors):.3f}")
+            if mid_errors:
+                print(f"  Mid game MAE: {np.mean(mid_errors):.3f}")
+            if end_errors:
+                print(f"  End game MAE: {np.mean(end_errors):.3f}")
+    
+    # Show critical moments (high advantage magnitude)
+    critical_moves = [(i, all_advantages.get(i, 0.0)) for i in range(len(trajectory_data))]
+    critical_moves.sort(key=lambda x: abs(x[1]), reverse=True)
+    
+    print(f"\n{'-'*80}")
+    print("CRITICAL MOMENTS (highest |advantage|)")
+    print(f"{'-'*80}")
+    
+    for i, adv in critical_moves[:5]:
+        data = trajectory_data[i]
+        print(f"Move {data['move_number']} ({data['turn']}): {data['move']} - "
+              f"Advantage: {adv:+.3f}, Value: {data['value']:+.3f}")
 
 
 def train():
-    torch.manual_seed(1982)
+    torch.manual_seed(1949)
     model_config = {
         "num_blocks": 20,
         "hidden_size": 640,
         "intermediate_size": 1728,
         "num_heads": 8,
-        "dropout": 0.05,
+        "dropout": 0.00, # No dropout for RL
         "possible_moves": len(UCI_MOVE_TO_IDX),
         "dtype": torch.float32
     }
@@ -667,24 +745,25 @@ def train():
     trainer = RLTrainer(
         model=model,
         learning_rate=1e-5,
-        value_ratio=0.6,
-        entropy_ratio=0.01,
-        invalid_pen_ratio=0.15,
+        value_ratio=0.2,
+        entropy_ratio=0.02,
+        invalid_pen_ratio=0.2,
         clip_eps=0.2,
         gamma=0.99,
-        gae_lambda=0.95,
-        k_epochs=10,
+        gae_lambda=0.85,
+        k_epochs=8,
         num_episodes=1024,
-        update_batch_size=154,
-        accumulation_steps=10,
-        max_grad_norm=1.0,
-        rollout_batch_size=384,
+        update_batch_size=192,
+        accumulation_steps=8,
+        max_grad_norm=1000,
+        rollout_batch_size=320,
         save_every_episodes=24,
-        log_every_steps=32,
+        log_every_steps=2,
+        track_kl=False, # True for debug use, will be very slow.
         model_config=model_config,
-        experiment_name="chessformer-rl_0"
+        experiment_name="chessformer-rl_2"
     )
-    trainer.resume("./ckpts/chessformer-sl_06.pth",from_sl_checkpoint=True)
+    trainer.resume("./ckpts/chessformer-sl_10.pth",from_sl_checkpoint=True)
     trainer.train()
 
 
