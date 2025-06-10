@@ -622,68 +622,25 @@ def analyze_single_fen(fen: str, depth: int=18, output_csv: Optional[str]=None):
 
 
 if __name__ == "__main__":
-    test_positions = [
-        "r3kbnr/ppq1pppp/2n5/2PpP3/6b1/2P2N2/PP3PPP/RNBQKB1R w KQkq - 1 7",
-        "r3kbnr/pp3ppp/2n1p3/1BPpq3/1P6/2P2Q2/P4PPP/RNB1K2R w KQkq - 0 10",
-        "r3kb1r/1p3ppp/2n1p3/pBPp1q2/PP2nB2/2P2Q2/3N1PPP/R2K3R w kq - 4 14",
-        "2kr1b1r/1p3ppp/2n1p3/1BP2q2/PP2pB2/6Q1/5PPP/R2K3R w - - 1 17",
-        "2kr1b1r/1p3ppp/4p3/1BP2q2/Pn2pB2/6Q1/5PPP/R1K4R w - - 0 18",
-        "rnbqkb1r/1p3ppp/4pn2/2Pp4/1P6/4PN2/P4PPP/RNBQKB1R b KQkq - 0 7",
-        "r1bq1rk1/1p2bppp/2n1pn2/2Pp4/PP6/1Q2PN2/3N1PPP/R1B1KB1R b KQ - 2 10",
-        "r1bq1rk1/1p2bppp/2n2n2/2Ppp3/PP6/1Q2PN2/1B1N1PPP/R3KB1R b KQ - 1 11",
-        "r3kbnr/ppq2ppp/2n1p3/2P1P3/4Q3/2P2b2/PP3PPP/RNB1KB1R w KQkq - 0 9",
-        "2kr3r/pp2nppp/4p3/1Bb1q3/8/2P2Q2/PP1N1PPP/R3K2R w KQ - 0 14",
-        "2kr3r/pp2n1pp/4p3/1Bb1qp2/4N3/2P2Q2/PP3PPP/R3K2R w KQ - 0 15",
-        "7r/ppk1n1pp/1b1rB3/8/1P6/2P1P3/P5PP/R4RK1 w - - 1 22",
-        "7r/ppk1nRpp/4r3/8/1P6/2P1b3/P5PP/R6K w - - 0 24",
-        "rn1qkb1r/3b1ppp/4pn2/1Ppp4/8/4PN2/P3BPPP/RNBQK2R b KQkq - 0 10",
-        "rn1q1rk1/3bbppp/3np3/1P1p4/P1p1P3/8/1B1NBPPP/RN1Q1RK1 b - - 2 15",
-        "rn1qkb1r/3b1ppp/4p3/1P1p4/P1p1n3/4P3/3NBPPP/RNBQK2R b KQkq - 1 12",
-        "rn1q1rk1/3b1ppp/3npb2/1P1pP3/P1p5/8/1B1NBPPP/RN1Q1RK1 b - - 0 16",
-        "rn1q1rk1/3b1ppp/3np3/1P1pB3/P1p5/8/3NBPPP/RN1Q1RK1 b - - 0 17",
-        "rn1q2k1/5r1p/5pp1/1P1ppb2/P1p5/B1N2B2/3N1PPP/R2Q1RK1 b - - 3 22",
-        "r2q2k1/5r1p/5p2/PP2nbp1/2p1p3/2NpB3/4BPPP/RN1Q1RK1 b - - 1 28",
-        "r3kbnr/ppq2ppp/2n1p3/2P1P3/4Q3/2P2b2/PP3PPP/RNB1KB1R w KQkq - 0 9",
-        "r3k1nr/ppq2ppp/2n1p3/2b1P3/8/2P2Q2/PP3PPP/RNB1KB1R w KQkq - 0 10",
-        "r3k1nr/ppq2ppp/2n1p3/4P3/1b6/2P2Q2/P4PPP/RNB1KB1R w KQkq - 0 11",
-        "r3k1nr/pp3ppp/2n1p3/4q3/1P6/5Q2/P4PPP/RNB1KB1R w KQkq - 0 12",
-        "3rk1nr/pp3ppp/2n1p3/4q3/1P6/5Q2/P4PPP/RNBK1B1R w k - 2 13",
-        "3rk2r/pp2nppp/2n1p3/8/1P6/3B1Q2/P2B1PPP/qN1K3R w k - 2 15",
-        "rn1qkb1r/3B1ppp/1p2pn2/p1Pp4/1P6/2P1PN2/P4PPP/RNBQK2R b KQkq - 0 8",
-        "r2qkb1r/3n1ppp/1pP1pn2/p2p4/1P6/2P1PN2/P4PPP/RNBQK2R b KQkq - 0 9",
-        "r4rk1/1q2bppp/1p2p3/3p4/P7/2B1PN2/5PPP/1R1Q1RK1 b - - 0 17",
-        "2r3k1/4b1p1/5p1p/3pp3/8/1Q2PN2/5PPP/B4RK1 b - - 0 26",
-    ]
-    for fen in test_positions:
-        analyze_single_fen(fen,depth=27,output_csv="./data/processed_lichess/lichess_annotated_depth18_dedup.csv")
     dataset_name = "nsarrazin/lichess-games-2023-01"
-    #depth27_split = "train[90000:95000]"
-    #depth27_path = "./data/processed_lichess/lichess_annotated_depth27.csv"
-    #convert_dataset(dataset_name,depth=27,split=depth27_split,target_positions=65536,output_csv=depth27_path,num_workers=9)
-    depth18_split = "train[3400000:3600000]"
-    depth18_path = "./data/processed_lichess/lichess_annotated_depth18_dedup.csv"
-    convert_dataset(dataset_name,depth=20,split=depth18_split,target_positions=36524*1536,output_csv=depth18_path,num_workers=8)
-    #ds = load_dataset("csv",data_files="./data/processed_lichess/lichess_annotated_depth27.csv",split="train")
-    #write_dedup_loose(
-    #    ds,
-    #    "./data/processed_lichess/lichess_annotated_depth27_dedup.csv",
-    #    batch_size=128,
-    #    dedup_prob=1.0
-    #)
-    #ds = load_dataset("csv",data_files="./data/processed_lichess/lichess_annotated_depth18.csv",split="train")
-    #write_dedup_loose(
-    #    ds,
-    #    "./data/processed_lichess/lichess_annotated_depth18_dedup.csv",
-    #    fen_queue_max_size=98304,
-    #    batch_size=1200,
-    #    dedup_prob=0.7
-    #)
-    upload_dataset_to_huggingface(
-        csv_files = {
-            "depth18": "./data/processed_lichess/lichess_annotated_depth18_dedup.csv",
-            "depth27": "./data/processed_lichess/lichess_annotated_depth27_dedup.csv"
-        },
-        repo_id="kaupane/lichess-2023-01-stockfish-annotated",
-        private=False,
-        max_shard_size='1GB'
+    depth27_split = "train[90000:95000]"
+    depth27_path = "./data/processed_lichess/lichess_annotated_depth27.csv"
+    convert_dataset(dataset_name,depth=27,split=depth27_split,target_positions=65536,output_csv=depth27_path,num_workers=9)
+    depth18_split = "train[:3600000]"
+    depth18_path = "./data/processed_lichess/lichess_annotated_depth18.csv"
+    convert_dataset(dataset_name,depth=20,split=depth18_split,target_positions=6000000,output_csv=depth18_path,num_workers=8)
+    ds = load_dataset("csv",data_files="./data/processed_lichess/lichess_annotated_depth27.csv",split="train")
+    write_dedup_loose(
+        ds,
+        "./data/processed_lichess/lichess_annotated_depth27_dedup.csv",
+        batch_size=128,
+        dedup_prob=1.0
+    )
+    ds = load_dataset("csv",data_files="./data/processed_lichess/lichess_annotated_depth18.csv",split="train")
+    write_dedup_loose(
+        ds,
+        "./data/processed_lichess/lichess_annotated_depth18_dedup.csv",
+        fen_queue_max_size=98304,
+        batch_size=1200,
+        dedup_prob=0.7
     )

@@ -117,8 +117,8 @@ The custom transformer design shows promise but reveals areas for improvement:
 
 ## Models Released
 
-- **[ChessFormer-SL](https://huggingface.co/kaupane/ChessFormer-SL)**: Supervised learning checkpoint (20th iteration)
-- **[ChessFormer-RL](https://huggingface.co/kaupane/ChessFormer-RL)**: RL initialization checkpoint (8th SL iteration)
+- **[ChessFormer-SL](https://huggingface.co/kaupane/ChessFormer-SL)**: Supervised learning checkpoint (~130k steps)
+- **[ChessFormer-RL](https://huggingface.co/kaupane/ChessFormer-RL)**: RL initialization checkpoint (~50k steps)
 
 ## Usage Example
 
