@@ -87,7 +87,7 @@ python train_rl.py
 
 | Model | Action Loss | Value Loss | Invalid Loss |
 |-------|-------------|------------|--------------|
-| ChessFormer-SL | training | in | progress |
+| ChessFormer-SL(step 79872 checkpoint) | 1.7171 | 0.0424 | 0.0325 |
 | ChessFormer-RL(intermediate ChessFormer-SL checkpoint) | 1.8329 | 0.0501 | 0.0484 |
 
 Invalid loss measures probability assigned to illegal moves.
