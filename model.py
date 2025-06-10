@@ -358,7 +358,7 @@ def load_model(ckpt_path):
     return model
 
 if __name__ == "__main__":
-    checkpoint = torch.load("./ckpts/chessformer-sl_06.pth",map_location=torch.device("cpu"))
+    checkpoint = torch.load("./ckpts/chessformer-sl_13.pth",map_location=torch.device("cpu"))
     model = ChessFormerModel(**checkpoint["config"])
     model.load_state_dict(checkpoint["model_state_dict"])
 

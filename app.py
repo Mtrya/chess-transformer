@@ -43,24 +43,25 @@ class ChessApp:
 
     def load_models(self):
         model_paths = {
-            "ChessFormer-SL": "./ckpts/chessformer-sl_01.pth",
-            "ChessFormer-RL": "./ckpts/chessformer-rl_final.pth"
+            "ChessFormer-SL": "kaupane/ChessFormer-SL",
+            "ChessFormer-RL": "kaupane/ChessFormer-RL"
         }
 
         for name, path in model_paths.items():
-            if os.path.exists(path):
-                print(f"Loading {name} from {path}...")
-                checkpoint = torch.load(path,map_location=self.device)
-                config = checkpoint["config"]
-                model = ChessFormerModel(**config)
-                model.load_state_dict(checkpoint["model_state_dict"])
-                model.to(self.device)
-                model.eval()
-
-                self.models[name] = model
-                print(f"Successfully loaded {name}.")
-            else:
-                print(f"Model file not found: {path}")
+            config = {
+                "num_blocks": 20,
+                "hidden_size": 640,
+                "intermediate_size": 1728,
+                "num_heads": 8,
+                "dropout": 0.00,
+                "possible_moves": 1969,
+                "dtype": torch.float32
+            }
+            model = ChessFormerModel(**config)
+            model.from_pretrained(path)
+            model.to(self.device)
+            model.eval()
+            self.models[name] = model
 
     def get_depth_limits(self, engine_type: str) -> Tuple[int,int]:
         if engine_type == "Stockfish":

@@ -364,30 +364,28 @@ def train():
     }
     model = ChessFormerModel(**model_config)
     ds = load_dataset("kaupane/lichess-2023-01-stockfish-annotated",split="depth18")
-    #ds = load_dataset("csv",data_files="./data/processed_lichess/lichess_annotated_depth18.csv",split="train")
     ds = ds.with_format("torch")
     dataloader = DataLoader(
         ds,
-        batch_size=64,
+        batch_size=192,
         shuffle=True,
-        num_workers=6,
+        num_workers=4,
         pin_memory=True)
     trainer = SLTrainer(
         model=model,
         dataloader=dataloader,
-        learning_rate=1.0e-4,
-        value_ratio=7.5, # increasing value_ratio results in faster actor_loss and invalid_loss drop, but has minor effect on value_loss curve. Weird, right? Maybe value does significantly help the model learn
+        learning_rate=1.5e-4,
+        value_ratio=4.0, # increasing value_ratio results in faster actor_loss and invalid_loss drop, but has minor effect on value_loss curve. Weird, right? Maybe value does significantly help the model learn
         invalid_pen_ratio=0.1,
-        num_epochs=3.0,
-        accumulation_steps=24,
+        num_epochs=4.0,
+        accumulation_steps=8,
         save_every_steps=6144,
         log_every_steps=24,
         warmup_ratio=0.05,
         lr_scheduler_type="cosine", 
         model_config=model_config,
-        experiment_name="chessformer-sl_3"
+        experiment_name="chessformer-sl_0"
     )
-    trainer.resume("./ckpts/chessformer-sl_06.pth")
     trainer.train()
 
 

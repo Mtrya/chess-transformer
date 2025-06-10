@@ -32,7 +32,7 @@ The project demonstrates both the potential and limitations of search-free chess
 ChessFormer uses a custom transformer architecture optimized for chess:
 
 - **Size**: 100.7M parameters (20 blocks, 640 hidden size, 8 heads, 1728 intermediate size)
-- **Input**: FEN tokenization with 77-token sequences (64 board positions + 13 metadata tokens)
+- **Input**: FEN tokenization with 75-token sequences (64 board positions + 9 metadata tokens + 2 special tokens)
 - **Output**: Policy head (1,969 possible moves) + Value head (position evaluation)
 - **Features**: RMSNorm, SwiGLU FFN, custom FEN tokenizer
 
@@ -54,11 +54,13 @@ pip install -r requirements.txt
 
 ### Running the Demo
 
-For the interactive chess application, download model checkpoints from HuggingFace first:
+For the interactive chess application, simply run app.py:
 
 ```bash
 python app.py
 ```
+
+It will download model checkpoints from huggingface.
 
 Alternatively, try the [HuggingFace Space demo](https://huggingface.co/spaces/kaupane/Chessformer_Demo) without local setup.
 
@@ -85,8 +87,8 @@ python train_rl.py
 
 | Model | Action Loss | Value Loss | Invalid Loss |
 |-------|-------------|------------|--------------|
-| ChessFormer-SL | 1.80 | 0.021 | 0.033 |
-| ChessFormer-RL(intermediate ChessFormer-SL checkpoint) | 1.95 | 0.046 | 0.045 |
+| ChessFormer-SL | training | in | progress |
+| ChessFormer-RL(intermediate ChessFormer-SL checkpoint) | 1.8329 | 0.0501 | 0.0484 |
 
 Invalid loss measures probability assigned to illegal moves.
 
@@ -94,7 +96,7 @@ Invalid loss measures probability assigned to illegal moves.
 
 ### Key Challenges Identified
 
-1. **Computational Inefficiency**: Heavy CPU operations in FEN tokenization during training. Future work should pre-process the entire dataset.
+1. **Computational Inefficiency**: Heavy CPU operations (and it's python for-loop) in FEN tokenization during training. Future work should pre-process the entire dataset.
 
 2. **Embedding Competition**: Piece embeddings and positional embeddings are additively combined, potentially competing for representational space. The consistently lower norm of piece embeddings compared to positional embeddings may contribute to tactical blunders (especially free captures).
 
@@ -110,7 +112,7 @@ Invalid loss measures probability assigned to illegal moves.
 
 The custom transformer design shows promise but reveals areas for improvement:
 
-- Search-enhanced inference can partially compensate for tactical weaknesses
+- Model benefits from depth more than width
 - Model scaling appears more beneficial than initially expected
 
 ## Models Released
@@ -135,6 +137,26 @@ repetitions = torch.tensor([1])
 
 with torch.no_grad():
     move_logits, position_value = model(fens, repetitions)
+```
+
+### With Chess Engine Interface
+
+```python
+from engine import Engine, ChessformerConfig
+import chess
+
+# Create engine
+config = ChessformerConfig(
+    chessformer=model,
+    temperature=0.5,
+    depth=2  # Enable search enhancement
+)
+engine = Engine(type="chessformer", chessformer_config=config)
+
+# Play move
+board = chess.Board()
+move_uci, value = engine.move(board)
+print(f"Suggested move: {move_uci}, Value: {value:.3f}")
 ```
 
 ## Contributing

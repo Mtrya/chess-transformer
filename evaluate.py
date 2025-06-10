@@ -1,32 +1,22 @@
 """
 Evaluate ChessFormerModel's different checkpoints on several metrics:
 - loss on kaupane/lichess-2023-01-stockfish-annotated dataset's depth27 split
-- win rate against Stockfish 17 at multiple depths (1, 5, 10, 12, 14, 15, 16, 17, 18, 20, 22, 25) with 200 games each
-- stockfish (Stockfish 17 depth 30) analyzed game quality + move annotation (best/excellent/good/inaccuracy/mistake/blunder)
+- stockfish (Stockfish 17 depth 24) analyzed game quality + move annotation (best/excellent/good/inaccuracy/mistake/blunder)
 """
 
 import torch
 import chess
-import chess.engine
-import datasets
-import pandas as pd
 from tqdm.auto import tqdm
-import argparse
-import os
-import json
-import time
 import math
 import multiprocessing
 from typing import Dict, List, Optional, Tuple
 from datasets import load_dataset
 from torch.utils.data import DataLoader
+import huggingface_hub
 
 from model import ChessFormerModel
 from utils import Engine, UCI_MOVE_TO_IDX, IDX_TO_UCI_MOVE, ChessformerConfig, StockfishConfig
 
-DEFAULT_STOCKFISH_DEPTHS = [1,5,10,12,14,15,16,17,18,20,22,25]
-DEFAULT_NUM_GAMES = 200
-DEFAULT_ANALYSIS_DEPTH = 30
 
 def load_model(checkpoint_path: str, device: torch.device) -> ChessFormerModel:
     print(f"Loading model from {checkpoint_path}...")
@@ -36,12 +26,12 @@ def load_model(checkpoint_path: str, device: torch.device) -> ChessFormerModel:
             config = checkpoint.get('config',{})
         except Exception as e:
             config = {
-                "num_blocks": 18,
+                "num_blocks": 20,
                 "hidden_size": 640,
-                "intermediate_size": 1920,
+                "intermediate_size": 1728,
                 "num_heads": 8,
                 "dropout": 0.00,
-                "possible_moves": len(UCI_MOVE_TO_IDX)
+                "possible_moves": 1969
             }
         model = ChessFormerModel(
             num_blocks=config.get('num_blocks'),
@@ -54,7 +44,13 @@ def load_model(checkpoint_path: str, device: torch.device) -> ChessFormerModel:
         model.to(device)
         model.load_state_dict(checkpoint['model_state_dict'])
         model.to(device)
-        model.eval
+        model.eval()
+        print("Model loaded successfully")
+        return model
+    except FileNotFoundError:
+        model = ChessFormerModel.from_pretrained(checkpoint_path)
+        model.to(device)
+        model.eval()
         print("Model loaded successfully")
         return model
     except Exception as e:
@@ -550,27 +546,18 @@ def main(model_path,device):
         max_batch_size=864
     )
     chessformer_engine = Engine("chessformer", config)
-    #evaluate_win_rate(
-    #    chessformer_engine=chessformer_engine,
-    #    stockfish_path=stockfish_path,
-    #    depths=[1,3,5,7,9,11,13,15,17],
-    #    num_games=240,
-    #    device=device
-    #)
     analyze_game_quality(
         chessformer_engine=chessformer_engine,
         stockfish_path="/usr/games/stockfish",
         num_games=4,
-        opponent_depth=6,
-        analysis_depth=20,
+        opponent_depth=0,
+        analysis_depth=24,
     )
 
 
 if __name__ == "__main__":
-    model_path = "./ckpts/chessformer-sl_06.pth"
-    device = torch.device("cuda")
-    #eval_loss(model_path,device)
+    #model_path = "./ckpts/chessformer-sl_10.pth"
+    model_path = "kaupane/ChessFormer-RL"
+    device = torch.device("cpu")
+    eval_loss(model_path,device)
     #main(model_path,device)
-    batch_size = 1200
-    checkpoint_path_list = ["./ckpts/chessformer-sl_06.pth","./ckpts/chessformer-sl_05.pth","./ckpts/chessformer-sl_04.pth"]
-    compare_checkpoints(checkpoint_path_list,device,batch_size)

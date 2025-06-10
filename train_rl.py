@@ -8,8 +8,7 @@ import copy
 import logging
 import chess
 import numpy as np
-from typing import List, Tuple, Dict, Optional
-import time
+from typing import List, Dict, Optional
 
 from utils import ReplayBuffer, BatchChessEnv, Game, UCI_MOVE_TO_IDX, IDX_TO_UCI_MOVE
 from model import ChessFormerModel
@@ -229,7 +228,6 @@ class RLTrainer:
                 uci_moves = self._make_action(fens,reps,games)
 
                 # Step environment
-                # ! Need to ensure BatchChessEnv handles "0000" dummy uci move
                 next_fens, next_reps, dones, infos = self.env.step(uci_moves)
 
                 # Update game completion status
@@ -286,11 +284,6 @@ class RLTrainer:
         )
         self.logger.info(log_message)
         print(log_message)
-
-        # --- Inspect Buffer ---
-        if batch_size <= 10:
-            self.inspect_buffer(games=games)
-        # --- Inspect Buffer ---
 
     def _update_params(self):
         """Update model parameters using PPO with additional invalid move penalty."""
@@ -740,8 +733,6 @@ def train():
         "dtype": torch.float32
     }
     model = ChessFormerModel(**model_config)
-    #checkpoint = torch.load("./ckpts/chessformer-sl_01.pth")
-    #model = model.load_state_dict(checkpoint["model_state_dict"])
     trainer = RLTrainer(
         model=model,
         learning_rate=1e-5,
@@ -761,9 +752,9 @@ def train():
         log_every_steps=4,
         track_kl=False, # True for debug use, will be very slow.
         model_config=model_config,
-        experiment_name="chessformer-rl_4"
+        experiment_name="chessformer-rl_0"
     )
-    trainer.resume("./ckpts/chessformer-rl_init.pth",from_sl_checkpoint=True)
+    #trainer.resume("./ckpts/chessformer-rl_init.pth",from_sl_checkpoint=True)
     trainer.train()
 
 
