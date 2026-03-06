@@ -23,5 +23,5 @@ chesslm/ckpts/*
 .gradio/*
 log/*
 *.md
-README.md
+!README.md
 
