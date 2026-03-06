@@ -46,18 +46,37 @@ ChessFormer uses a custom transformer architecture optimized for chess:
 
 ## Installation & Setup
 
+This project uses [uv](https://github.com/astral-sh/uv) for dependency management. Make sure you have uv installed first:
+
+```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then clone the repository and install dependencies:
+
 ```bash
 git clone https://github.com/Mtrya/chess-transformer
 cd chess-transformer
-pip install -r requirements.txt
+uv sync
+```
+
+To run commands within the project environment:
+
+```bash
+# Run a script
+uv run python app.py
+
+# Or activate the virtual environment
+source .venv/bin/activate
 ```
 
 ### Running the Demo
 
-For the interactive chess application, simply run app.py:
+For the interactive chess application, simply run:
 
 ```bash
-python app.py
+uv run python app.py
 ```
 
 It will download model checkpoints from huggingface.
@@ -68,10 +87,10 @@ Alternatively, try the [HuggingFace Space demo](https://huggingface.co/spaces/ka
 
 ```bash
 # Supervised Learning
-python train_sl.py
+uv run python train_sl.py
 
 # Reinforcement Learning  
-python train_rl.py
+uv run python train_rl.py
 ```
 
 ## Training Details
