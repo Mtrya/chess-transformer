@@ -24,4 +24,6 @@ chesslm/ckpts/*
 log/*
 *.md
 !README.md
+data/201411*
+data/202301*
 
