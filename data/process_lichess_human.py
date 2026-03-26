@@ -1,6 +1,7 @@
 import argparse
 import collections
 import csv
+import itertools
 import json
 import multiprocessing
 import os
@@ -15,7 +16,6 @@ import chess
 from datasets import Dataset, DatasetDict, Features, Value, load_dataset, load_from_disk
 from huggingface_hub import create_repo
 from tqdm import tqdm
-
 
 FINAL_FEATURES = Features(
     {
@@ -94,7 +94,9 @@ def batched_games(
         yield batch
 
 
-def extract_batch(game_batches: Sequence[List[str]], bucket_count: int) -> ExtractionBatchResult:
+def extract_batch(
+    game_batches: Sequence[List[str]], bucket_count: int
+) -> ExtractionBatchResult:
     counts: collections.Counter[Tuple[str, str]] = collections.Counter()
     positions_emitted = 0
 
@@ -131,7 +133,9 @@ class BucketSqliteManager:
         self.bucket_dir = bucket_dir
         self.bucket_dir.mkdir(parents=True, exist_ok=True)
         self.max_open_dbs = max_open_dbs
-        self._connections: "collections.OrderedDict[int, sqlite3.Connection]" = collections.OrderedDict()
+        self._connections: "collections.OrderedDict[int, sqlite3.Connection]" = (
+            collections.OrderedDict()
+        )
 
     def _bucket_path(self, bucket_id: int) -> Path:
         return self.bucket_dir / f"bucket-{bucket_id:05d}.sqlite"
@@ -169,7 +173,9 @@ class BucketSqliteManager:
         return conn
 
     def write_rows(self, rows: Sequence[Tuple[int, str, str, int]]) -> int:
-        grouped_rows: Dict[int, List[Tuple[str, str, int]]] = collections.defaultdict(list)
+        grouped_rows: Dict[int, List[Tuple[str, str, int]]] = collections.defaultdict(
+            list
+        )
 
         for bucket_id, fen, next_move, count in rows:
             grouped_rows[bucket_id].append((fen, next_move, count))
@@ -210,7 +216,11 @@ def load_manifest(path: Path) -> Dict:
 def ensure_clean_output_dir(output_dir: Path, overwrite: bool):
     if output_dir.exists() and overwrite:
         shutil.rmtree(output_dir)
-    elif output_dir.exists() and any(output_dir.iterdir()) and not (output_dir / "manifest.json").exists():
+    elif (
+        output_dir.exists()
+        and any(output_dir.iterdir())
+        and not (output_dir / "manifest.json").exists()
+    ):
         raise FileExistsError(
             f"Refusing to reuse non-empty output directory without a manifest: {output_dir}. "
             "Pass --overwrite to clear it."
@@ -228,22 +238,23 @@ def reduce_bucket_to_splits(
 
     train_count = 0
     validation_count = 0
-    cursor = conn.execute("SELECT fen, next_move, count FROM counts")
+    try:
+        cursor = conn.execute("SELECT fen, next_move, count FROM counts")
 
-    for fen, next_move, count in cursor:
-        row = {
-            "fen": fen,
-            "next_move": next_move,
-            "count": int(count),
-        }
-        if split_for_pair(fen, next_move, val_ratio) == "validation":
-            validation_writer.writerow(row)
-            validation_count += 1
-        else:
-            train_writer.writerow(row)
-            train_count += 1
-
-    conn.close()
+        for fen, next_move, count in cursor:
+            row = {
+                "fen": fen,
+                "next_move": next_move,
+                "count": int(count),
+            }
+            if split_for_pair(fen, next_move, val_ratio) == "validation":
+                validation_writer.writerow(row)
+                validation_count += 1
+            else:
+                train_writer.writerow(row)
+                train_count += 1
+    finally:
+        conn.close()
     return train_count, validation_count
 
 
@@ -347,21 +358,33 @@ def run_extraction(
                 total_games += result.games_processed
                 total_positions += result.positions_emitted
                 total_aggregated_rows += writer.write_rows(result.aggregated_rows)
+                result.aggregated_rows = []  # free the large list immediately
                 pbar.update(result.games_processed)
-                pbar.set_postfix({"pairs": total_positions, "rows": total_aggregated_rows})
+                pbar.set_postfix(
+                    {"pairs": total_positions, "rows": total_aggregated_rows}
+                )
         else:
             pool = multiprocessing.Pool(processes=num_workers)
-            worker = pool.imap_unordered(
-                _extract_batch_star,
-                ((batch, bucket_count) for batch in batch_iterator),
-                chunksize=1,
-            )
-            for result in worker:
-                total_games += result.games_processed
-                total_positions += result.positions_emitted
-                total_aggregated_rows += writer.write_rows(result.aggregated_rows)
-                pbar.update(result.games_processed)
-                pbar.set_postfix({"pairs": total_positions, "rows": total_aggregated_rows})
+            # Feed the pool in bounded chunks so that Pool._handle_tasks does not
+            # eagerly drain the entire generator into its unbounded internal task
+            # queue, which would materialise every batch in memory at once.
+            batch_args = ((batch, bucket_count) for batch in batch_iterator)
+            chunk_size = num_workers * 2
+            while True:
+                chunk = list(itertools.islice(batch_args, chunk_size))
+                if not chunk:
+                    break
+                for result in pool.imap_unordered(
+                    _extract_batch_star, chunk, chunksize=1
+                ):
+                    total_games += result.games_processed
+                    total_positions += result.positions_emitted
+                    total_aggregated_rows += writer.write_rows(result.aggregated_rows)
+                    result.aggregated_rows = []  # free the large list immediately
+                    pbar.update(result.games_processed)
+                    pbar.set_postfix(
+                        {"pairs": total_positions, "rows": total_aggregated_rows}
+                    )
     finally:
         pbar.close()
         writer.close()
@@ -406,11 +429,16 @@ def run_reduction(
     train_csv = final_dir / "train.csv"
     validation_csv = final_dir / "validation.csv"
 
-    with train_csv.open("w", encoding="utf-8", newline="") as train_handle, validation_csv.open(
-        "w", encoding="utf-8", newline=""
-    ) as validation_handle:
-        train_writer = csv.DictWriter(train_handle, fieldnames=list(FINAL_FEATURES.keys()))
-        validation_writer = csv.DictWriter(validation_handle, fieldnames=list(FINAL_FEATURES.keys()))
+    with (
+        train_csv.open("w", encoding="utf-8", newline="") as train_handle,
+        validation_csv.open("w", encoding="utf-8", newline="") as validation_handle,
+    ):
+        train_writer = csv.DictWriter(
+            train_handle, fieldnames=list(FINAL_FEATURES.keys())
+        )
+        validation_writer = csv.DictWriter(
+            validation_handle, fieldnames=list(FINAL_FEATURES.keys())
+        )
         train_writer.writeheader()
         validation_writer.writeheader()
 
@@ -470,7 +498,9 @@ def run_assembly(
         {
             "completed": True,
             "dataset_dir": str(dataset_dir),
-            "splits": {split_name: len(split_ds) for split_name, split_ds in dataset.items()},
+            "splits": {
+                split_name: len(split_ds) for split_name, split_ds in dataset.items()
+            },
         }
     )
     write_manifest(manifest_path, manifest)

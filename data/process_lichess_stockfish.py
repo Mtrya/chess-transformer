@@ -1,6 +1,7 @@
 import argparse
 import collections
 import csv
+import itertools
 import json
 import multiprocessing
 import os
@@ -16,7 +17,6 @@ import chess.engine
 from datasets import Dataset, DatasetDict, Features, Value, load_dataset, load_from_disk
 from huggingface_hub import create_repo
 from tqdm import tqdm
-
 
 FINAL_FEATURES = Features(
     {
@@ -95,7 +95,11 @@ def load_manifest(path: Path) -> Dict:
 def ensure_clean_output_dir(output_dir: Path, overwrite: bool):
     if output_dir.exists() and overwrite:
         shutil.rmtree(output_dir)
-    elif output_dir.exists() and any(output_dir.iterdir()) and not (output_dir / "manifest.json").exists():
+    elif (
+        output_dir.exists()
+        and any(output_dir.iterdir())
+        and not (output_dir / "manifest.json").exists()
+    ):
         raise FileExistsError(
             f"Refusing to reuse non-empty output directory without a manifest: {output_dir}. "
             "Pass --overwrite to clear it."
@@ -108,7 +112,9 @@ class FenCountSqliteManager:
         self.bucket_dir = bucket_dir
         self.bucket_dir.mkdir(parents=True, exist_ok=True)
         self.max_open_dbs = max_open_dbs
-        self._connections: "collections.OrderedDict[int, sqlite3.Connection]" = collections.OrderedDict()
+        self._connections: "collections.OrderedDict[int, sqlite3.Connection]" = (
+            collections.OrderedDict()
+        )
 
     def _bucket_path(self, bucket_id: int) -> Path:
         return self.bucket_dir / f"bucket-{bucket_id:05d}.sqlite"
@@ -175,7 +181,9 @@ def parse_source_splits(source_splits: str) -> Optional[List[str]]:
         return None
     splits = [part.strip() for part in source_splits.split(",") if part.strip()]
     if not splits:
-        raise ValueError("--source-splits must be 'all' or a comma-separated list of split names")
+        raise ValueError(
+            "--source-splits must be 'all' or a comma-separated list of split names"
+        )
     return splits
 
 
@@ -185,12 +193,21 @@ def resolve_dataset_splits(
 ) -> List[Tuple[str, Iterable[Dict]]]:
     if isinstance(dataset_obj, DatasetDict):
         if requested_splits is None:
-            return [(split_name, dataset_obj[split_name]) for split_name in dataset_obj.keys()]
+            return [
+                (split_name, dataset_obj[split_name])
+                for split_name in dataset_obj.keys()
+            ]
 
-        missing_splits = [split_name for split_name in requested_splits if split_name not in dataset_obj]
+        missing_splits = [
+            split_name
+            for split_name in requested_splits
+            if split_name not in dataset_obj
+        ]
         if missing_splits:
             raise ValueError(f"Requested splits not found in dataset: {missing_splits}")
-        return [(split_name, dataset_obj[split_name]) for split_name in requested_splits]
+        return [
+            (split_name, dataset_obj[split_name]) for split_name in requested_splits
+        ]
 
     if requested_splits is not None and requested_splits != ["train"]:
         raise ValueError("Specific source splits require a DatasetDict source.")
@@ -212,7 +229,7 @@ def iter_source_rows(
         return
 
     if requested_splits is None:
-        dataset_obj = load_dataset(source)
+        dataset_obj = load_dataset(source, streaming=True)
         split_iterables = resolve_dataset_splits(dataset_obj, requested_splits)
         for _, split_dataset in split_iterables:
             for row in split_dataset:
@@ -273,8 +290,7 @@ def collapse_batch(rows: Sequence[Dict], bucket_count: int) -> CollapseBatchResu
         total_count += count
 
     aggregated_rows = [
-        (bucket_for_fen(fen, bucket_count), fen, count)
-        for fen, count in counts.items()
+        (bucket_for_fen(fen, bucket_count), fen, count) for fen, count in counts.items()
     ]
 
     return CollapseBatchResult(
@@ -289,7 +305,9 @@ def _collapse_batch_star(args) -> CollapseBatchResult:
     return collapse_batch(*args)
 
 
-def open_stockfish_engine(stockfish_path: str, depth: int, engine_threads: int) -> chess.engine.SimpleEngine:
+def open_stockfish_engine(
+    stockfish_path: str, depth: int, engine_threads: int
+) -> chess.engine.SimpleEngine:
     del depth
     engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
     try:
@@ -300,7 +318,11 @@ def open_stockfish_engine(stockfish_path: str, depth: int, engine_threads: int) 
 
 
 def init_annotation_worker(stockfish_path: str, depth: int, engine_threads: int):
-    global _ANNOTATION_ENGINE, _ANNOTATION_ENGINE_PATH, _ANNOTATION_DEPTH, _ANNOTATION_THREADS
+    global \
+        _ANNOTATION_ENGINE, \
+        _ANNOTATION_ENGINE_PATH, \
+        _ANNOTATION_DEPTH, \
+        _ANNOTATION_THREADS
     _ANNOTATION_ENGINE_PATH = stockfish_path
     _ANNOTATION_DEPTH = depth
     _ANNOTATION_THREADS = engine_threads
@@ -317,7 +339,11 @@ def close_annotation_engine():
 def get_annotation_engine() -> chess.engine.SimpleEngine:
     global _ANNOTATION_ENGINE
     if _ANNOTATION_ENGINE is None:
-        if _ANNOTATION_ENGINE_PATH is None or _ANNOTATION_DEPTH is None or _ANNOTATION_THREADS is None:
+        if (
+            _ANNOTATION_ENGINE_PATH is None
+            or _ANNOTATION_DEPTH is None
+            or _ANNOTATION_THREADS is None
+        ):
             raise RuntimeError("Stockfish worker engine is not initialized.")
         _ANNOTATION_ENGINE = open_stockfish_engine(
             _ANNOTATION_ENGINE_PATH,
@@ -509,22 +535,23 @@ def reduce_bucket_to_splits(
 
     train_count = 0
     validation_count = 0
-    cursor = conn.execute("SELECT fen, next_move, count FROM rows")
+    try:
+        cursor = conn.execute("SELECT fen, next_move, count FROM rows")
 
-    for fen, next_move, count in cursor:
-        row = {
-            "fen": fen,
-            "next_move": next_move,
-            "count": int(count),
-        }
-        if split_for_fen(fen, val_ratio) == "validation":
-            validation_writer.writerow(row)
-            validation_count += 1
-        else:
-            train_writer.writerow(row)
-            train_count += 1
-
-    conn.close()
+        for fen, next_move, count in cursor:
+            row = {
+                "fen": fen,
+                "next_move": next_move,
+                "count": int(count),
+            }
+            if split_for_fen(fen, val_ratio) == "validation":
+                validation_writer.writerow(row)
+                validation_count += 1
+            else:
+                train_writer.writerow(row)
+                train_count += 1
+    finally:
+        conn.close()
     return train_count, validation_count
 
 
@@ -574,22 +601,30 @@ def run_collapse(
                 total_valid_rows += result.valid_rows
                 total_count += result.total_count
                 total_aggregated_rows += writer.write_rows(result.aggregated_rows)
+                result.aggregated_rows = []  # free the large list immediately
                 pbar.update(result.processed_rows)
                 pbar.set_postfix({"valid": total_valid_rows, "count": total_count})
         else:
             pool = multiprocessing.Pool(processes=num_workers)
-            worker = pool.imap_unordered(
-                _collapse_batch_star,
-                ((batch, bucket_count) for batch in row_batches),
-                chunksize=1,
-            )
-            for result in worker:
-                total_rows += result.processed_rows
-                total_valid_rows += result.valid_rows
-                total_count += result.total_count
-                total_aggregated_rows += writer.write_rows(result.aggregated_rows)
-                pbar.update(result.processed_rows)
-                pbar.set_postfix({"valid": total_valid_rows, "count": total_count})
+            # Feed the pool in bounded chunks so that Pool._handle_tasks does not
+            # eagerly drain the entire generator into its unbounded internal task
+            # queue, which would materialise every batch in memory at once.
+            batch_args = ((batch, bucket_count) for batch in row_batches)
+            chunk_size = num_workers * 2
+            while True:
+                chunk = list(itertools.islice(batch_args, chunk_size))
+                if not chunk:
+                    break
+                for result in pool.imap_unordered(
+                    _collapse_batch_star, chunk, chunksize=1
+                ):
+                    total_rows += result.processed_rows
+                    total_valid_rows += result.valid_rows
+                    total_count += result.total_count
+                    total_aggregated_rows += writer.write_rows(result.aggregated_rows)
+                    result.aggregated_rows = []  # free the large list immediately
+                    pbar.update(result.processed_rows)
+                    pbar.set_postfix({"valid": total_valid_rows, "count": total_count})
     finally:
         pbar.close()
         writer.close()
@@ -601,7 +636,9 @@ def run_collapse(
         {
             "completed": True,
             "source": source,
-            "source_splits": list(source_splits) if source_splits is not None else "all",
+            "source_splits": list(source_splits)
+            if source_splits is not None
+            else "all",
             "processed_rows": total_rows,
             "valid_rows": total_valid_rows,
             "total_count": total_count,
@@ -700,14 +737,18 @@ def run_annotation(
                 )
                 write_manifest(manifest_path, manifest)
                 pbar.update(1)
-                pbar.set_postfix({"rows": total_rows_written, "skip": total_skipped_positions})
+                pbar.set_postfix(
+                    {"rows": total_rows_written, "skip": total_skipped_positions}
+                )
         else:
             pool = multiprocessing.Pool(
                 processes=num_workers,
                 initializer=init_annotation_worker,
                 initargs=(stockfish_path, depth, engine_threads),
             )
-            for result in pool.imap_unordered(annotate_bucket, pending_tasks, chunksize=1):
+            for result in pool.imap_unordered(
+                annotate_bucket, pending_tasks, chunksize=1
+            ):
                 if result.error_message:
                     raise RuntimeError(
                         f"Bucket {result.bucket_id:05d} annotation failed: {result.error_message}"
@@ -729,7 +770,9 @@ def run_annotation(
                 )
                 write_manifest(manifest_path, manifest)
                 pbar.update(1)
-                pbar.set_postfix({"rows": total_rows_written, "skip": total_skipped_positions})
+                pbar.set_postfix(
+                    {"rows": total_rows_written, "skip": total_skipped_positions}
+                )
     finally:
         pbar.close()
         if pool is not None:
@@ -768,11 +811,16 @@ def run_assembly(
     train_csv = final_dir / "train.csv"
     validation_csv = final_dir / "validation.csv"
 
-    with train_csv.open("w", encoding="utf-8", newline="") as train_handle, validation_csv.open(
-        "w", encoding="utf-8", newline=""
-    ) as validation_handle:
-        train_writer = csv.DictWriter(train_handle, fieldnames=list(FINAL_FEATURES.keys()))
-        validation_writer = csv.DictWriter(validation_handle, fieldnames=list(FINAL_FEATURES.keys()))
+    with (
+        train_csv.open("w", encoding="utf-8", newline="") as train_handle,
+        validation_csv.open("w", encoding="utf-8", newline="") as validation_handle,
+    ):
+        train_writer = csv.DictWriter(
+            train_handle, fieldnames=list(FINAL_FEATURES.keys())
+        )
+        validation_writer = csv.DictWriter(
+            validation_handle, fieldnames=list(FINAL_FEATURES.keys())
+        )
         train_writer.writeheader()
         validation_writer.writeheader()
 
@@ -796,7 +844,9 @@ def run_assembly(
             "completed": True,
             "dataset_dir": str(dataset_dir),
             "val_ratio": val_ratio,
-            "splits": {split_name: len(split_ds) for split_name, split_ds in dataset.items()},
+            "splits": {
+                split_name: len(split_ds) for split_name, split_ds in dataset.items()
+            },
             "train_rows": total_train_rows,
             "validation_rows": total_validation_rows,
         }
@@ -872,7 +922,9 @@ def main():
     manifest = load_manifest(manifest_path)
     manifest["config"] = {
         "source": args.source,
-        "source_splits": list(requested_splits) if requested_splits is not None else "all",
+        "source_splits": list(requested_splits)
+        if requested_splits is not None
+        else "all",
         "output_dir": str(output_dir),
         "stockfish_path": args.stockfish_path,
         "depth": args.depth,
