@@ -14,7 +14,15 @@ from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Un
 
 import chess
 import chess.engine
-from datasets import Dataset, DatasetDict, Features, Value, load_dataset, load_from_disk
+from datasets import (
+    Dataset,
+    DatasetDict,
+    Features,
+    Value,
+    load_dataset,
+    load_dataset_builder,
+    load_from_disk,
+)
 from huggingface_hub import create_repo
 from tqdm import tqdm
 
@@ -229,7 +237,7 @@ def iter_source_rows(
         return
 
     if requested_splits is None:
-        dataset_obj = load_dataset(source, streaming=True)
+        dataset_obj = load_dataset(source)
         split_iterables = resolve_dataset_splits(dataset_obj, requested_splits)
         for _, split_dataset in split_iterables:
             for row in split_dataset:
@@ -237,7 +245,7 @@ def iter_source_rows(
         return
 
     for split_name in requested_splits:
-        split_dataset = load_dataset(source, split=split_name, streaming=True)
+        split_dataset = load_dataset(source, split=split_name)
         for row in split_dataset:
             yield row
 
@@ -555,6 +563,39 @@ def reduce_bucket_to_splits(
     return train_count, validation_count
 
 
+def total_source_rows(
+    source: str,
+    requested_splits: Optional[Sequence[str]],
+) -> Optional[int]:
+    """Return the total number of source rows from metadata only, without iterating.
+
+    Returns None if the count cannot be determined (e.g. network error, unknown
+    dataset format), in which case the progress bar will run without a total.
+    """
+    try:
+        source_path = Path(source)
+        if source_path.exists():
+            dataset_obj = load_from_disk(str(source_path))
+            if isinstance(dataset_obj, DatasetDict):
+                splits = (
+                    list(dataset_obj.keys())
+                    if requested_splits is None
+                    else list(requested_splits)
+                )
+                return sum(len(dataset_obj[s]) for s in splits)
+            return len(dataset_obj)
+        # HuggingFace Hub path: fetch split metadata without downloading data.
+        builder = load_dataset_builder(source)
+        split_infos = builder.info.splits or {}
+        if requested_splits is None:
+            return sum(info.num_examples for info in split_infos.values())
+        return sum(
+            split_infos[s].num_examples for s in requested_splits if s in split_infos
+        )
+    except Exception:
+        return None
+
+
 def run_collapse(
     source: str,
     source_splits: Optional[Sequence[str]],
@@ -590,7 +631,13 @@ def run_collapse(
     total_aggregated_rows = 0
 
     pool = None
-    progress_total = max_source_rows if max_source_rows is not None else None
+    if max_source_rows is not None:
+        progress_total: Optional[int] = max_source_rows
+    else:
+        raw_total = total_source_rows(source, source_splits)
+        progress_total = (
+            max(0, raw_total - skip_source_rows) if raw_total is not None else None
+        )
     pbar = tqdm(total=progress_total, desc="Collapsing source rows", unit="row")
 
     try:
@@ -872,7 +919,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", required=True)
     parser.add_argument("--source-splits", default="all")
     parser.add_argument("--output-dir", default="./data/processed_lichess_stockfish")
-    parser.add_argument("--stockfish-path", default="/usr/games/stockfish")
+    parser.add_argument("--stockfish-path", default="/usr/bin/stockfish")
     parser.add_argument("--depth", type=int, default=18)
     parser.add_argument("--num-workers", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--engine-threads", type=int, default=1)

@@ -13,7 +13,14 @@ from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import chess
-from datasets import Dataset, DatasetDict, Features, Value, load_dataset, load_from_disk
+from datasets import (
+    Dataset,
+    DatasetDict,
+    Features,
+    Value,
+    load_dataset,
+    load_from_disk,
+)
 from huggingface_hub import create_repo
 from tqdm import tqdm
 
@@ -330,7 +337,7 @@ def run_extraction(
         print("Extraction already completed; skipping.")
         return
 
-    dataset = load_dataset(dataset_name, split=split, streaming=True)
+    dataset = load_dataset(dataset_name, split=split)
     batch_iterator = batched_games(
         dataset=dataset,
         games_per_batch=games_per_batch,
@@ -348,7 +355,10 @@ def run_extraction(
     total_aggregated_rows = 0
 
     pool = None
-    progress_total = max_games if max_games is not None else None
+    if max_games is not None:
+        progress_total: Optional[int] = max_games
+    else:
+        progress_total = max(0, len(dataset) - skip_games)
     pbar = tqdm(total=progress_total, desc="Extracting games", unit="game")
 
     try:
