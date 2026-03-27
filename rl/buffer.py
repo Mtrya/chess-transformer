@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 import chess
 import numpy as np
@@ -37,7 +37,7 @@ class Game:
         self.invalid_masks.append(inv_m)
 
     def update_game_status(self, done, reason):
-        if done:
+        if done == True:
             self.active = False
             if reason in ["1-0", "0-1", "1/2-1/2"]:
                 self.completion_reason = reason

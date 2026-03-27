@@ -15,7 +15,10 @@ def load_local_dataset(dataset_path: Path) -> Union[Dataset, DatasetDict]:
 
 def dataset_split_sizes(dataset: Union[Dataset, DatasetDict]) -> dict:
     if isinstance(dataset, DatasetDict):
-        return {split_name: len(split_dataset) for split_name, split_dataset in dataset.items()}
+        return {
+            split_name: len(split_dataset)
+            for split_name, split_dataset in dataset.items()
+        }
     return {"train": len(dataset)}
 
 
@@ -57,10 +60,22 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Upload a local Hugging Face dataset saved with save_to_disk() to the Hub."
     )
-    parser.add_argument("--dataset-path", required=True, help="Local path produced by save_to_disk().")
-    parser.add_argument("--repo-id", required=True, help="Target dataset repo, for example username/dataset-name.")
-    parser.add_argument("--token", default=None, help="Optional Hugging Face token override.")
-    parser.add_argument("--private", action="store_true", help="Create the repo as private if it does not exist.")
+    parser.add_argument(
+        "--dataset-path", required=True, help="Local path produced by save_to_disk()."
+    )
+    parser.add_argument(
+        "--repo-id",
+        required=True,
+        help="Target dataset repo, for example username/dataset-name.",
+    )
+    parser.add_argument(
+        "--token", default=None, help="Optional Hugging Face token override."
+    )
+    parser.add_argument(
+        "--private",
+        action="store_true",
+        help="Create the repo as private if it does not exist.",
+    )
     parser.add_argument(
         "--max-shard-size",
         default="500MB",
