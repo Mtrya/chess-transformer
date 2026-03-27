@@ -911,6 +911,10 @@ def run_assembly(
         }
         write_manifest(manifest_path, manifest)
 
+    # Clean up temporary annotated bucket directory after successful assembly
+    if annotated_dir.exists():
+        shutil.rmtree(annotated_dir)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -920,11 +924,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-splits", default="all")
     parser.add_argument("--output-dir", default="./data/processed_lichess_stockfish")
     parser.add_argument("--stockfish-path", default="/usr/bin/stockfish")
-    parser.add_argument("--depth", type=int, default=18)
+    parser.add_argument("--depth", type=int, default=16)
     parser.add_argument("--num-workers", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--engine-threads", type=int, default=1)
-    parser.add_argument("--rows-per-batch", type=int, default=8192)
-    parser.add_argument("--bucket-count", type=int, default=2048)
+    parser.add_argument("--rows-per-batch", type=int, default=32)
+    parser.add_argument("--bucket-count", type=int, default=262144)
     parser.add_argument("--max-source-rows", type=int, default=None)
     parser.add_argument("--skip-source-rows", type=int, default=0)
     parser.add_argument("--val-ratio", type=float, default=0.001)

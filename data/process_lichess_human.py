@@ -476,6 +476,9 @@ def run_reduction(
     )
     write_manifest(manifest_path, manifest)
 
+    if bucket_dir.exists():
+        shutil.rmtree(bucket_dir)
+
 
 def run_assembly(
     output_dir: Path,
@@ -529,7 +532,7 @@ def run_assembly(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a deduplicated human-move chess dataset from nsarrazin/lichess-games-2023-01."
+        description="Build a deduplicated human-move chess dataset from nsarrazin/lichess-games-*."
     )
     parser.add_argument("--dataset-name", default="nsarrazin/lichess-games-2023-01")
     parser.add_argument("--split", default="train")
@@ -537,7 +540,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--games-per-batch", type=int, default=2048)
     parser.add_argument("--bucket-count", type=int, default=2048)
-    parser.add_argument("--max-games", type=int, default=None)
+    parser.add_argument("--max-games", type=int, default=20_000_000)
     parser.add_argument("--skip-games", type=int, default=0)
     parser.add_argument("--val-ratio", type=float, default=0.001)
     parser.add_argument("--push-to-hub", action="store_true")
