@@ -56,16 +56,51 @@ def push_dataset(
     )
 
 
+def combine_subsets(
+    human_path: Path,
+    stockfish_path: Path,
+) -> DatasetDict:
+    """
+    Load human and stockfish datasets and combine them into a single DatasetDict
+    with flattened split names: human_train, human_val, stockfish_train, stockfish_val.
+    """
+    human = load_local_dataset(human_path)
+    stockfish = load_local_dataset(stockfish_path)
+
+    combined = DatasetDict()
+    
+    # Add human splits
+    if "train" in human:
+        combined["human_train"] = human["train"]
+    if "validation" in human:
+        combined["human_val"] = human["validation"]
+    
+    # Add stockfish splits
+    if "train" in stockfish:
+        combined["stockfish_train"] = stockfish["train"]
+    if "validation" in stockfish:
+        combined["stockfish_val"] = stockfish["validation"]
+
+    return combined
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Upload a local Hugging Face dataset saved with save_to_disk() to the Hub."
+        description="Upload chess datasets (human and stockfish) to Hugging Face Hub."
     )
     parser.add_argument(
-        "--dataset-path", required=True, help="Local path produced by save_to_disk()."
+        "--human-path",
+        default="data/202301_human/dataset",
+        help="Path to human dataset directory produced by save_to_disk().",
+    )
+    parser.add_argument(
+        "--stockfish-path",
+        default="data/201411_stockfish/dataset",
+        help="Path to stockfish dataset directory produced by save_to_disk().",
     )
     parser.add_argument(
         "--repo-id",
-        required=True,
+        default="kaupane/chess-positions",
         help="Target dataset repo, for example username/dataset-name.",
     )
     parser.add_argument(
@@ -91,12 +126,17 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
-    dataset_path = Path(args.dataset_path)
-    dataset = load_local_dataset(dataset_path)
-    split_sizes = dataset_split_sizes(dataset)
+    human_path = Path(args.human_path)
+    stockfish_path = Path(args.stockfish_path)
 
-    print(f"Loaded local dataset from {dataset_path}")
-    print(f"Split sizes: {split_sizes}")
+    # Load and combine datasets
+    print(f"Loading human dataset from {human_path}")
+    print(f"Loading stockfish dataset from {stockfish_path}")
+    
+    combined = combine_subsets(human_path, stockfish_path)
+    split_sizes = dataset_split_sizes(combined)
+    
+    print(f"Combined dataset splits: {split_sizes}")
 
     api = HfApi(token=args.token)
     if repo_exists(api=api, repo_id=args.repo_id, token=args.token) and not args.force:
@@ -104,13 +144,14 @@ def main():
         return
 
     push_dataset(
-        dataset=dataset,
+        dataset=combined,
         repo_id=args.repo_id,
         token=args.token,
         private=args.private,
         max_shard_size=args.max_shard_size,
     )
     print(f"Dataset uploaded to {args.repo_id}")
+    print(f"Available splits: {list(combined.keys())}")
 
 
 if __name__ == "__main__":
